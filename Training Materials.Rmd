@@ -1,0 +1,364 @@
+---
+title: "Retail Transactions:  Training Material"
+author: ""
+output: html_document
+params:
+  year.name: "2020"
+  month.name: "January"
+  month.start: "2020-01-01"
+  customers.file: "data_training/customers.csv"
+  products.file: "data_training/products.csv"
+  transactions.file: "data_training/transactions -- January 2020.csv"
+  views.file: "data_training/views -- January 2020.csv"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r seed}
+set.seed(41)
+```
+
+```{r libraries}
+library(data.table)
+library(DT)
+```
+
+```{r constants}
+first.n.days <- 7
+top.n.products <- 10
+
+month.start <- as.POSIXct(
+  params$month.start,
+  format = "%Y-%m-%d",
+  tz = "UTC"
+)
+```
+
+```{r functions}
+round.numerics <- function(x, digits){
+  if(is.numeric(x)){
+    x <- round(x = x, digits = digits)
+  }
+  return(x)
+}
+```
+
+```{r load_data}
+customers <- fread(input = params$customers.file)
+products <- fread(input = params$products.file)
+transactions <- fread(input = params$transactions.file)
+views <- fread(input = params$views.file)
+```
+
+```{r explore_data, eval = FALSE}
+# Check basic structure
+names(customers)
+names(products)
+names(transactions)
+names(views)
+
+# Check number of rows and columns
+dim(customers)
+dim(products)
+dim(transactions)
+dim(views)
+
+# Look at first few rows
+head(customers)
+head(products)
+head(transactions)
+head(views)
+
+# Check product categories
+unique(products$category)
+
+# Check date ranges
+range(transactions$time)
+range(views$time)
+
+# Check missing values
+colSums(is.na(customers))
+colSums(is.na(products))
+colSums(is.na(transactions))
+colSums(is.na(views))
+```
+
+
+```{r clean_data}
+transactions[, time := as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC")]
+views[, time := as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC")]
+```
+
+
+
+## Introduction
+
+This document covers three important skills I learned from working with the ZYA Sales retail dataset. The first is parsing datetime strings correctly into date-time objects so that our date-based filtering works as expected. The second is defining different parameters to make your code reusable across months without rewriting any logic. The third is writing functions instead of repeating calculations on certain data table so the report stays readable and easy to maintain. All three skills were essential to building the automated monthly reporting system for this project.
+
+---
+
+## Skill 1: Parsing Datetime Strings
+
+### Why This Is Difficult
+
+When we load the transactions or views data with `fread`, the time column has a plain string type. It looks like a date, but R does not treat it as a date. Any attempt to filter by date will produce wrong results or an error.
+
+Here is what the raw time column looks like:
+
+```{r datetime_bad_example}
+# Load without parsing -- time is still a character string
+raw.views <- fread(input = params$views.file)
+class(raw.views$time)
+head(raw.views$time)
+```
+
+If we try to filter the first seven days of the month without converting the time column first, R is still treating the values as character strings instead of real date-time values. This becomes a problem when we try to do date arithmetic, such as adding seven days to the start date. Since a character string cannot be used like a date object, the code may return an error or produce unreliable filtering results.
+
+### The Solution: Convert with as.POSIXct
+
+The time column in this dataset uses ISO 8601 format with a UTC timezone indicator, for example `2020-01-03T14:22:05Z`. We must parse it with `as.POSIXct` using the matching format string and set the timezone explicitly to UTC. If we omit the timezone, R will apply your local system timezone instead, which shifts all timestamps and causes incorrect results when filtering by date. I include this step in the data cleaning part at the beginning of this template.
+
+```{r datetime_good_example}
+# Convert time column to POSIXct with correct format and timezone
+views[, time := as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC")]
+transactions[, time := as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC")]
+
+class(views$time)
+head(views$time)
+```
+
+Once the column is properly parsed, date-based filtering works correctly. Here is an example filtering views to the first seven days of the month:
+
+```{r datetime_filter_example}
+n.days <- 7
+cutoff <- month.start + n.days * 24 * 60 * 60
+
+first.week.views <- views[time >= month.start & time < cutoff]
+
+cat("Total views in", params$month.name, params$year.name, ":", nrow(views), "\n")
+cat("Views in the first", n.days, "days:", nrow(first.week.views), "\n")
+```
+
+The key things to remember are to use `%OSZ` at the end of the format string to handle the UTC suffix, always specify `tz = "UTC"`, and always convert before doing any date comparison or filtering.
+
+---
+
+## Skill 2: Using Parameters for Reproducibility
+
+### Why This Is Difficult
+
+When we first start analyzing monthly data, it is tempting to hard-code the month name, file paths, and date ranges directly into your code. For example, you might write something like this:
+
+```{r params_bad_example, eval = FALSE}
+# Hard coded approach -- works only for January data
+views.jan <- fread("data/views -- January 2020.csv")
+cat("Report for January 2020")
+```
+
+This approach has a serious problem. When February arrives, we have to find every hard-coded value in our script and update it manually. If we miss even one, the report produces wrong results. With we deal with all ten business questions across multiple data files, the chance of a mistake is high.
+
+### The Solution: Use params
+
+R Markdown allows us to define parameters in the YAML header at the top of the file. These parameters act as named inputs that can be changed in one place and automatically flow through the entire document. We access each parameter with `params$` inside any code chunk.
+
+In this report the parameters are defined as follows:
+
+```yaml
+params:
+  year.name: "2020"
+  month.name: "January"
+  month.start: "2020-01-01"
+  customers.file: "data_training/customers.csv"
+  products.file: "data_training/products.csv"
+  transactions.file: "data_training/transactions -- January 2020.csv"
+  views.file: "data_training/views -- January 2020.csv"
+```
+
+Here is the same file loading step written with parameters instead of hard-coded paths:
+
+```{r params_good_example, eval = FALSE}
+# Parameterized approach -- works for any month
+customers <- fread(input = params$customers.file)
+products <- fread(input = params$products.file)
+transactions <- fread(input = params$transactions.file)
+views <- fread(input = params$views.file)
+
+cat("Report for", params$month.name, params$year.name, "\n")
+```
+
+To generate the February report, only the automation script needs to change. The `.Rmd` template stays exactly the same:
+
+```{r automation_example, eval = FALSE}
+# Automation script for February -- only the params list values changes
+rmarkdown::render(
+  input = "Template -- Monthly Report.Rmd",
+  output_file = "Monthly-Report -- February -- Part2.html",
+  params = list(
+    year.name = "2020",
+    month.name = "February",
+    month.start = "2020-02-01",
+    customers.file = "data/customers.csv",
+    products.file = "data/products.csv",
+    transactions.file = "data/transactions -- February 2020.csv",
+    views.file = "data/views -- February 2020.csv"
+  )
+)
+```
+
+This pattern means the report template is written once and reused every month. The person running the report does not need to understand the R code inside it. They only need to update the seven param values in the automation script when necessary.
+
+---
+
+## Skill 3: Writing Functions Instead of Repeating Calculations
+
+### Why This Is Difficult
+
+Several of the ten business questions require very similar steps applied to different groups. For example, Question 8 asks for viewing statistics for four age groups: 18-34, 35-49, 50-64, and 65+. Without a function, we need to copy the same merging, filtering, and summarizing logic four times and change only the age boundaries each time. Here is what that looks like:
+
+```{r functions_bad_example, eval = FALSE}
+# Repeated logic for each age group -- hard to maintain and easy to make inconsistent mistakes
+views.with.age <- merge(
+  x = views,
+  y = customers[, .(customer_id, age)],
+  by = "customer_id",
+  all.x = TRUE
+)
+
+group.18_34 <- views.with.age[age >= 18 & age < 35]
+
+group.18_34 <- group.18_34[
+  ,
+  .(unique_products_viewed = uniqueN(product_id)),
+  by = customer_id
+]
+
+group.18_34 <- group.18_34[
+  ,
+  .(
+    age_group = "18-34",
+    mean_unique_products_viewed = mean(unique_products_viewed),
+    median_unique_products_viewed = median(unique_products_viewed),
+    standard_deviation_unique_products_viewed = sd(unique_products_viewed)
+  )
+]
+
+group.35_49 <- views.with.age[age >= 35 & age < 50]
+
+group.35_49 <- group.35_49[
+  ,
+  .(unique_products_viewed = uniqueN(product_id)),
+  by = customer_id
+]
+
+group.35_49 <- group.35_49[
+  ,
+  .(
+    age_group = "35-49",
+    mean_unique_products_viewed = mean(unique_products_viewed),
+    median_unique_products_viewed = median(unique_products_viewed),
+    standard_deviation_unique_products_viewed = sd(unique_products_viewed)
+  )
+]
+
+# ...and so on for 50-64 and 65+
+```
+
+This approach is difficult to maintain. If a column name, statistic, or filtering rule needs to change, we have to update every repeated code block. With several questions and multiple groups, this quickly becomes easy to break and hard for another consultant to review.
+
+### The Solution: Write a Function Once, Call It for Each Group
+
+A better approach is to write a function that accepts the varying parts as parameters and handles all the repeated steps internally. Here is the `get.products.viewed.by.age` function I defined in this project:
+
+```{r functions_example}
+get.products.viewed.by.age <- function(views, customers, min.age, max.age, age.group) {
+  
+  views.with.age <- merge(
+    x = views,
+    y = customers[, .(customer_id, age)],
+    by = "customer_id",
+    all.x = TRUE
+  )
+  
+  if(is.infinite(max.age)) {
+    views.age.group <- views.with.age[age >= min.age]
+  } else {
+    views.age.group <- views.with.age[age >= min.age & age < max.age]
+  }
+  
+  unique.products.by.customer <- views.age.group[
+    ,
+    .(unique_products_viewed = uniqueN(product_id)),
+    by = customer_id
+  ]
+  
+  result <- unique.products.by.customer[
+    ,
+    .(
+      age_group = age.group,
+      mean_unique_products_viewed = mean(unique_products_viewed),
+      median_unique_products_viewed = median(unique_products_viewed),
+      standard_deviation_unique_products_viewed = sd(unique_products_viewed)
+    )
+  ]
+  
+  return(result[])
+}
+```
+
+Once the function is defined, answering Q8 for all four age groups becomes four clean function calls that are easy to read and easy to verify:
+
+```{r functions_call_example}
+q8.result <- rbind(
+  get.products.viewed.by.age(
+    views = views,
+    customers = customers,
+    min.age = 18,
+    max.age = 35,
+    age.group = "18-34"
+  ),
+  
+  get.products.viewed.by.age(
+    views = views,
+    customers = customers,
+    min.age = 35,
+    max.age = 50,
+    age.group = "35-49"
+  ),
+  
+  get.products.viewed.by.age(
+    views = views,
+    customers = customers,
+    min.age = 50,
+    max.age = 65,
+    age.group = "50-64"
+  ),
+  
+  get.products.viewed.by.age(
+    views = views,
+    customers = customers,
+    min.age = 65,
+    max.age = Inf,
+    age.group = "65+"
+  )
+)
+
+q8.result[, mean_unique_products_viewed := round(mean_unique_products_viewed, 2)]
+q8.result[, median_unique_products_viewed := round(median_unique_products_viewed, 2)]
+q8.result[, standard_deviation_unique_products_viewed := round(standard_deviation_unique_products_viewed, 2)]
+
+datatable(q8.result)
+```
+
+Notice that the 65+ group passes `max.age = Inf`. The function handles this with an `if` statement that removes the upper age bound when the maximum is infinite. This edge case only needs to be handled once inside the function, rather than being rewritten every time we filter for an age group.
+
+The same principle applies throughout the report. Functions like `get.customer.views` and `get.customer.spending` each encapsulate one piece of logic that is defined once and called cleanly wherever it is needed. A new consultant can understand the purpose of the analysis by reading the function call, without needing to trace through repeated data manipulation code each time.
+
+---
+
+## Summary
+
+These three skills build on each other. Parsing datetime strings correctly ensures that date-based filtering produces accurate results. Parameters ensure the report can be run for any month without changing the analysis code. Functions ensure that each piece of logic is written once and reused consistently throughout the report.
+
+A new consultant joining this project should first review the YAML `params` block at the top of the template to understand which inputs control the report. Next, they should review the functions chunk to understand how the main business questions are calculated. Finally, before applying any date-based filters, they should confirm that all time columns have been converted from character strings into proper date-time objects.

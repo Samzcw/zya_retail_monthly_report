@@ -1,0 +1,241 @@
+project1_part1
+
+load data
+
+```{r}
+library(data.table)
+customers <- fread("data_part1/customers.csv")
+products <- fread("data_part1/products.csv")
+transactions <- fread("data_part1/transactions -- January 2020.csv")
+views <- fread("data_part1/views -- January 2020.csv")
+
+transactions[, time := as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC")]
+views[, time := as.POSIXct(time, format = "%Y-%m-%dT%H:%M:%OSZ", tz = "UTC")]
+```
+
+Question1
+
+```{r}
+views_first_7 <- views[
+  time >= as.POSIXct("2020-01-01", tz = "UTC") &
+    time < as.POSIXct("2020-01-08", tz = "UTC")
+]
+
+product_views <- views_first_7[
+  ,
+  .(num_views = .N),
+  by = product_id
+]
+
+q1_answer <- product_views[order(-num_views)][1]
+
+q1_answer
+```
+
+Question2
+
+```{r}
+coat_products <- products[
+  category == "coat",
+  .(product_id)
+]
+
+coat_views <- views[
+  product_id %in% coat_products$product_id,
+  .(num_views = .N),
+  by = product_id
+]
+
+q2_answer <- coat_views[num_views == max(num_views)]
+
+q2_answer
+```
+
+Question3
+
+```{r}
+shoes_products <- products[
+  category == "shoes",
+  product_id
+]
+
+shoes_revenue <- transactions[
+  product_id %in% shoes_products,
+  sum(price * quantity)
+]
+
+q3_answer <- shoes_revenue
+
+round(shoes_revenue, 2)
+```
+
+Question4
+
+```{r}
+customer_spending <- transactions[
+  ,
+  .(total_spending = sum(price * quantity)),
+  by = customer_id
+]
+
+avg_spending <- customer_spending[
+  ,
+  mean(total_spending)
+]
+
+q4_answer <- avg_spending
+
+round(avg_spending, 2)
+```
+
+Question5
+
+```{r}
+transaction_with_revenue <- transactions[, revenue := price * quantity]
+
+transactions_with_gender <- merge(
+  x = transaction_with_revenue,
+  y = customers[, .(customer_id, gender)],
+  by = "customer_id",
+  all.x = TRUE
+)
+
+total_revenue <- transactions_with_gender[
+  ,
+  sum(revenue)
+]
+
+female_revenue <- transactions_with_gender[
+  gender == "F",
+  sum(revenue)
+]
+
+female_percent <- female_revenue / total_revenue * 100
+
+q5_answer <- female_percent
+
+round(q5_answer, 1)
+```
+
+Question6
+
+```{r}
+customer_spending <- transactions[
+  ,
+  .(monthly_spending = sum(price * quantity)),
+  by = customer_id
+]
+
+customer_model_data <- merge(
+  x = customers,
+  y = customer_spending,
+  by = "customer_id",
+  all.x = TRUE
+)
+
+customer_model_data[is.na(monthly_spending), monthly_spending := 0]
+
+q6_model <- lm(
+  monthly_spending ~ income + age + gender + region,
+  data = customer_model_data
+)
+
+summary(q6_model)
+
+answer_q6 <- coef(q6_model)["income"] * 10000
+
+round(answer_q6, 2)
+```
+
+Question7
+
+```{r}
+viewed_customers <- unique(views$customer_id)
+purchased_customers <- unique(transactions$customer_id)
+
+viewed_and_purchased <- intersect(viewed_customers, purchased_customers)
+q7_answer <- length(viewed_and_purchased) / length(viewed_customers) * 100
+
+round(q7_answer, 1)
+```
+
+Question8
+
+```{r}
+customer_views <- merge(
+  x = views,
+  y = customers[, .(customer_id, age)],
+  by = "customer_id",
+  all.x = TRUE
+)
+
+customer_views_q8 <- customer_views[
+  age >= 35 & age < 50
+]
+
+unique_products_per_customer <- customer_views_q8[
+  ,
+  .(num_unique_products = uniqueN(product_id)),
+  by = customer_id
+]
+
+q8_answer <- median(unique_products_per_customer$num_unique_products)
+
+q8_answer
+```
+
+Question9
+
+```{r}
+customer_views <- views[
+  ,
+  .(total_views = .N),
+  by = customer_id
+]
+
+customer_spending <- transactions[
+  ,
+  .(monthly_spending = sum(price * quantity)),
+  by = customer_id
+]
+
+q9_data <- merge(
+  x = customers,
+  y = customer_views,
+  by = "customer_id"
+)
+
+q9_data <- merge(
+  x = q9_data,
+  y = customer_spending,
+  by = "customer_id",
+  all.x = TRUE
+)
+
+q9_data[is.na(monthly_spending), monthly_spending := 0]
+
+q9_model <- lm(
+  monthly_spending ~ total_views + age + gender + income + region,
+  data = q9_data
+)
+
+summary(q9_model)
+
+q9_answer <- coef(q9_model)["total_views"] * 10
+
+round(q9_answer, 2)
+```
+
+Question10
+
+```{r}
+coat_transactions <- transactions[
+  product_id %in% coat_products$product_id,
+  .(num_transactions = sum(quantity)),
+  by = customer_id
+]
+
+q10_answer <- coat_transactions[order(-num_transactions)][1]
+
+q10_answer
+```
